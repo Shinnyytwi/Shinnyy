@@ -1,0 +1,464 @@
+// Plugin RemNote - Interactive and Randomized Cards
+// Fichier unique : index.js
+
+async function onActivate(plugin) {
+  // Styles CSS intégrés
+  const injectStyles = () => {
+    const styleId = 'interactive-cards-styles';
+    if (document.getElementById(styleId)) return;
+    
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .interactive-card {
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      
+      .interactive-card:hover {
+        border-color: #007bff;
+        box-shadow: 0 6px 20px rgba(0,123,255,0.15);
+        transform: translateY(-2px);
+      }
+      
+      .card-question {
+        margin-bottom: 20px;
+        padding: 15px;
+        background: rgba(255,255,255,0.9);
+        border-radius: 8px;
+        border-left: 4px solid #007bff;
+      }
+      
+      .card-question h3 {
+        color: #007bff;
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      
+      .answer-option {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        margin: 8px 0;
+        background: white;
+        border-radius: 8px;
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .answer-option:hover {
+        border-color: #007bff;
+        background: #f8f9ff;
+        transform: translateX(3px);
+      }
+      
+      .answer-option.selected {
+        border-color: #007bff;
+        background: #e3f2fd;
+      }
+      
+      .answer-option.correct {
+        border-color: #28a745;
+        background: #d4edda;
+        animation: pulse 0.6s ease;
+      }
+      
+      .answer-option.incorrect {
+        border-color: #dc3545;
+        background: #f8d7da;
+        animation: shake 0.6s ease;
+      }
+      
+      .card-controls {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 15px 0;
+      }
+      
+      .card-controls button {
+        padding: 10px 16px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+      
+      .shuffle-btn { background: #ffc107; color: #212529; }
+      .hint-btn { background: #17a2b8; color: white; }
+      .check-btn { background: #28a745; color: white; }
+      .reset-btn { background: #6c757d; color: white; }
+      
+      .card-controls button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      }
+      
+      .card-hints {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        display: none;
+      }
+      
+      .card-result {
+        padding: 15px;
+        border-radius: 8px;
+        text-align: center;
+        font-weight: 600;
+        margin: 10px 0;
+        display: none;
+      }
+      
+      .card-result.correct {
+        background: #d4edda;
+        color: #155724;
+        border: 2px solid #c3e6cb;
+      }
+      
+      .card-result.incorrect {
+        background: #f8d7da;
+        color: #721c24;
+        border: 2px solid #f5c6cb;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+      }
+      
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-3px); }
+        75% { transform: translateX(3px); }
+      }
+    `;
+    document.head.appendChild(style);
+  };
+
+  // Fonctions JavaScript pour l'interactivité
+  const injectScripts = () => {
+    if (window.interactiveCardsLoaded) return;
+    
+    window.shuffleAnswers = (cardId) => {
+      const card = document.querySelector(`[data-card-id="${cardId}"]`);
+      if (!card) return;
+      
+      const answersContainer = card.querySelector('.card-answers');
+      const answerOptions = Array.from(answersContainer.querySelectorAll('.answer-option'));
+      
+      // Mélanger
+      for (let i = answerOptions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        answersContainer.insertBefore(answerOptions[j], answerOptions[i].nextSibling);
+      }
+      
+      // Reset selections
+      card.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.checked = false;
+      });
+      card.querySelectorAll('.answer-option').forEach(opt => {
+        opt.classList.remove('selected', 'correct', 'incorrect');
+      });
+      card.querySelector('.card-result').style.display = 'none';
+    };
+    
+    window.showHint = (cardId) => {
+      const card = document.querySelector(`[data-card-id="${cardId}"]`);
+      const hintsDiv = card.querySelector('.card-hints');
+      hintsDiv.style.display = hintsDiv.style.display === 'none' ? 'block' : 'none';
+    };
+    
+    window.checkAnswer = (cardId) => {
+      const card = document.querySelector(`[data-card-id="${cardId}"]`);
+      const selectedRadio = card.querySelector(`input[name="answer_${cardId}"]:checked`);
+      
+      if (!selectedRadio) {
+        alert('⚠️ Sélectionnez une réponse !');
+        return;
+      }
+      
+      const selectedOption = selectedRadio.closest('.answer-option');
+      const correctOption = card.querySelector('.answer-option[data-correct="true"]');
+      const resultDiv = card.querySelector('.card-result');
+      
+      // Reset styles
+      card.querySelectorAll('.answer-option').forEach(opt => {
+        opt.classList.remove('correct', 'incorrect');
+      });
+      
+      // Mark answers
+      correctOption.classList.add('correct');
+      
+      if (selectedOption === correctOption) {
+        resultDiv.textContent = '🎉 Correct ! Excellente réponse !';
+        resultDiv.className = 'card-result correct';
+      } else {
+        selectedOption.classList.add('incorrect');
+        resultDiv.textContent = '❌ Incorrect. La bonne réponse était : ' + correctOption.querySelector('label').textContent;
+        resultDiv.className = 'card-result incorrect';
+      }
+      
+      resultDiv.style.display = 'block';
+      
+      // Disable inputs
+      card.querySelectorAll('input[type="radio"]').forEach(radio => radio.disabled = true);
+    };
+    
+    window.resetCard = (cardId) => {
+      const card = document.querySelector(`[data-card-id="${cardId}"]`);
+      
+      // Reset everything
+      card.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.checked = false;
+        radio.disabled = false;
+      });
+      
+      card.querySelectorAll('.answer-option').forEach(opt => {
+        opt.classList.remove('selected', 'correct', 'incorrect');
+      });
+      
+      card.querySelector('.card-result').style.display = 'none';
+      card.querySelector('.card-hints').style.display = 'none';
+    };
+    
+    // Event delegation pour les clics sur les réponses
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.answer-option')) {
+        const option = e.target.closest('.answer-option');
+        const card = option.closest('.interactive-card');
+        const radio = option.querySelector('input[type="radio"]');
+        
+        if (!radio.disabled) {
+          // Deselect all in this card
+          card.querySelectorAll('.answer-option').forEach(opt => {
+            opt.classList.remove('selected');
+          });
+          
+          // Select this one
+          option.classList.add('selected');
+          radio.checked = true;
+        }
+      }
+    });
+    
+    window.interactiveCardsLoaded = true;
+  };
+
+  // Commande pour créer une carte interactive
+  await plugin.app.registerCommand({
+    id: 'create-interactive-card',
+    name: 'Créer une carte interactive',
+    action: async () => {
+      const focusedRem = await plugin.focus.getFocusedRem();
+      if (!focusedRem) {
+        await plugin.app.toast('⚠️ Sélectionnez un Rem pour créer la carte');
+        return;
+      }
+      
+      const cardId = `card_${Date.now()}`;
+      
+      const cardHtml = `
+<div class="interactive-card" data-card-id="${cardId}">
+  <div class="card-question">
+    <h3>❓ Question</h3>
+    <p><strong>Quelle est la capitale de la France ?</strong></p>
+  </div>
+  
+  <div class="card-answers">
+    <div class="answer-option" data-correct="true">
+      <input type="radio" name="answer_${cardId}" value="0">
+      <label>Paris</label>
+    </div>
+    <div class="answer-option">
+      <input type="radio" name="answer_${cardId}" value="1">
+      <label>Londres</label>
+    </div>
+    <div class="answer-option">
+      <input type="radio" name="answer_${cardId}" value="2">
+      <label>Berlin</label>
+    </div>
+    <div class="answer-option">
+      <input type="radio" name="answer_${cardId}" value="3">
+      <label>Madrid</label>
+    </div>
+  </div>
+  
+  <div class="card-controls">
+    <button class="shuffle-btn" onclick="shuffleAnswers('${cardId}')">🔀 Mélanger</button>
+    <button class="hint-btn" onclick="showHint('${cardId}')">💡 Indice</button>
+    <button class="check-btn" onclick="checkAnswer('${cardId}')">✓ Vérifier</button>
+    <button class="reset-btn" onclick="resetCard('${cardId}')" style="display:none;">↻ Reset</button>
+  </div>
+  
+  <div class="card-hints">
+    <h4>💡 Indice :</h4>
+    <p>C'est la ville lumière, située sur la Seine.</p>
+  </div>
+  
+  <div class="card-result"></div>
+</div>`;
+
+      // Injecter les styles et scripts
+      injectStyles();
+      injectScripts();
+      
+      // Ajouter la carte au Rem
+      await plugin.richText.insertRichText(focusedRem._id, [{
+        text: cardHtml,
+        formatting: { code: false }
+      }]);
+      
+      await plugin.app.toast('✅ Carte interactive créée !');
+    },
+  });
+
+  // Commande pour mélanger toutes les cartes
+  await plugin.app.registerCommand({
+    id: 'shuffle-all-cards',
+    name: 'Mélanger toutes les cartes',
+    action: async () => {
+      injectScripts();
+      
+      const cards = document.querySelectorAll('.interactive-card');
+      if (cards.length === 0) {
+        await plugin.app.toast('⚠️ Aucune carte interactive trouvée');
+        return;
+      }
+      
+      cards.forEach(card => {
+        const cardId = card.getAttribute('data-card-id');
+        if (cardId) window.shuffleAnswers(cardId);
+      });
+      
+      await plugin.app.toast(`🔀 ${cards.length} cartes mélangées !`);
+    },
+  });
+
+  // Commande pour créer un quiz aléatoire
+  await plugin.app.registerCommand({
+    id: 'create-random-quiz',
+    name: 'Quiz aléatoire rapide',
+    action: async () => {
+      const questions = [
+        {
+          question: "Quelle est la capitale de l'Italie ?",
+          answers: ["Rome", "Milan", "Naples", "Turin"],
+          correct: 0,
+          hint: "Ville éternelle où se trouve le Vatican"
+        },
+        {
+          question: "Quel est le plus grand océan ?",
+          answers: ["Atlantique", "Indien", "Arctique", "Pacifique"],
+          correct: 3,
+          hint: "Il couvre plus d'un tiers de la surface terrestre"
+        },
+        {
+          question: "Qui a peint la Joconde ?",
+          answers: ["Picasso", "Léonard de Vinci", "Michel-Ange", "Raphaël"],
+          correct: 1,
+          hint: "Génie de la Renaissance italienne"
+        },
+        {
+          question: "Combien y a-t-il de continents ?",
+          answers: ["5", "6", "7", "8"],
+          correct: 2,
+          hint: "Amérique du Nord, Amérique du Sud, Europe, Asie, Afrique, Océanie, Antarctique"
+        }
+      ];
+      
+      // Mélanger les questions
+      const shuffledQuestions = questions.sort(() => Math.random() - 0.5);
+      
+      // Créer un nouveau Rem pour le quiz
+      const quizRem = await plugin.rem.createRem();
+      await plugin.rem.setText(quizRem._id, "🎲 Quiz Aléatoire");
+      
+      injectStyles();
+      injectScripts();
+      
+      // Ajouter chaque question
+      for (let i = 0; i < shuffledQuestions.length; i++) {
+        const q = shuffledQuestions[i];
+        const cardId = `quiz_${Date.now()}_${i}`;
+        
+        // Mélanger les réponses
+        const shuffledAnswers = [...q.answers];
+        const correctText = q.answers[q.correct];
+        
+        for (let j = shuffledAnswers.length - 1; j > 0; j--) {
+          const k = Math.floor(Math.random() * (j + 1));
+          [shuffledAnswers[j], shuffledAnswers[k]] = [shuffledAnswers[k], shuffledAnswers[j]];
+        }
+        
+        const newCorrectIndex = shuffledAnswers.indexOf(correctText);
+        
+        const cardHtml = `
+<div class="interactive-card" data-card-id="${cardId}">
+  <div class="card-question">
+    <h3>❓ Question ${i + 1}/${shuffledQuestions.length}</h3>
+    <p><strong>${q.question}</strong></p>
+  </div>
+  
+  <div class="card-answers">
+    ${shuffledAnswers.map((answer, idx) => `
+    <div class="answer-option" ${idx === newCorrectIndex ? 'data-correct="true"' : ''}>
+      <input type="radio" name="answer_${cardId}" value="${idx}">
+      <label>${answer}</label>
+    </div>`).join('')}
+  </div>
+  
+  <div class="card-controls">
+    <button class="shuffle-btn" onclick="shuffleAnswers('${cardId}')">🔀 Mélanger</button>
+    <button class="hint-btn" onclick="showHint('${cardId}')">💡 Indice</button>
+    <button class="check-btn" onclick="checkAnswer('${cardId}')">✓ Vérifier</button>
+    <button class="reset-btn" onclick="resetCard('${cardId}')" style="display:none;">↻ Reset</button>
+  </div>
+  
+  <div class="card-hints">
+    <h4>💡 Indice :</h4>
+    <p>${q.hint}</p>
+  </div>
+  
+  <div class="card-result"></div>
+</div>`;
+
+        const childRem = await plugin.rem.createRem();
+        await plugin.rem.setText(childRem._id, cardHtml);
+        await plugin.rem.moveRem(childRem._id, quizRem._id);
+      }
+      
+      await plugin.focus.focusRem(quizRem._id);
+      await plugin.app.toast(`🎯 Quiz créé avec ${shuffledQuestions.length} questions !`);
+    },
+  });
+
+  await plugin.app.toast('🎮 Plugin Interactive Cards activé !');
+}
+
+async function onDeactivate(_plugin) {
+  // Nettoyage
+  const style = document.getElementById('interactive-cards-styles');
+  if (style) style.remove();
+  
+  window.interactiveCardsLoaded = false;
+}
+
+// Export pour RemNote
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { onActivate, onDeactivate };
+} else {
+  // Pour utilisation directe
+  window.interactiveCardsPlugin = { onActivate, onDeactivate };
+}
